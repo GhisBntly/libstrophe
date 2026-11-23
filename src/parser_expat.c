@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #include <expat.h>
 
@@ -63,8 +64,8 @@ static char *_xml_name(xmpp_ctx_t *ctx, const char *nsname)
     len = strlen(c);
     result = xmpp_alloc(ctx, len + 1);
     if (result != NULL) {
-	memcpy(result, c, len);
-	result[len] = '\0';
+    memcpy(result, c, len);
+    result[len] = '\0';
     }
 
     return result;
@@ -78,11 +79,11 @@ static char *_xml_namespace(xmpp_ctx_t *ctx, const char *nsname)
 
     c = strchr(nsname, NAMESPACE_SEP);
     if (c != NULL) {
-	result = xmpp_alloc(ctx, (c-nsname) + 1);
-	if (result != NULL) {
-	    memcpy(result, nsname, (c-nsname));
-	    result[c-nsname] = '\0';
-	}
+        result = xmpp_alloc(ctx, (c-nsname) + 1);
+        if (result != NULL) {
+            memcpy(result, nsname, (c-nsname));
+            result[c-nsname] = '\0';
+        }
     }
 
     return result;
@@ -223,6 +224,16 @@ static void _characters(void *userdata, const XML_Char *s, int len)
     strncat(parser->inner_text, s, len);
 }
 
+const xmpp_mem_t* GXmppMem = NULL;
+static void UpdateMemCtx(parser_t* parser)
+{
+    assert(parser);
+    assert(parser->ctx);
+    assert(parser->ctx->mem);
+
+    GXmppMem = parser->ctx->mem;
+}
+
 parser_t *parser_new(xmpp_ctx_t *ctx,
                      parser_start_callback startcb,
                      parser_end_callback endcb,
@@ -245,7 +256,7 @@ parser_t *parser_new(xmpp_ctx_t *ctx,
         parser->inner_text_size = 0;
         parser->inner_text_used = 0;
 
-        parser_reset(parser);
+        parser_reset(parser, 0);
     }
 
     return parser;
@@ -259,35 +270,68 @@ char* parser_attr_name(xmpp_ctx_t *ctx, char *nsname)
 /* free a parser */
 void parser_free(parser_t *parser)
 {
+    UpdateMemCtx(parser);
+
     if (parser->expat)
         XML_ParserFree(parser->expat);
 
     if (parser->inner_text) {
         xmpp_free (parser->ctx, parser->inner_text);
         parser->inner_text = NULL;
+        parser->inner_text_used = 0;
+        parser->inner_text_size = 0;
     }
 
     xmpp_free(parser->ctx, parser);
 }
 
-/* shuts down and restarts XML parser.  true on success */
-int parser_reset(parser_t *parser)
+void* malloc_fcn(size_t size)
 {
+    return GXmppMem->alloc(size, GXmppMem->userdata);
+}
+
+void* realloc_fcn(void *ptr, size_t size)
+{
+    return GXmppMem->realloc(ptr, size, GXmppMem->userdata);
+}
+
+void free_fcn(void *ptr)
+{
+    GXmppMem->free(ptr, GXmppMem->userdata);
+}
+
+/* shuts down and restarts XML parser.  true on success */
+int parser_reset(parser_t *parser, int depth)
+{
+    UpdateMemCtx(parser);
+
     if (parser->expat)
-	XML_ParserFree(parser->expat);
+        XML_ParserReset(parser->expat, NULL);
+    else
+    {
+        XML_Memory_Handling_Suite mem;
+        mem.malloc_fcn = malloc_fcn;
+        mem.realloc_fcn = realloc_fcn;
+        mem.free_fcn = free_fcn;
+
+        XML_Char sep = NAMESPACE_SEP;
+
+        parser->expat = XML_ParserCreate_MM(NULL, &mem, &sep);
+    }
 
     if (parser->stanza) 
-	xmpp_stanza_release(parser->stanza);
+    xmpp_stanza_release(parser->stanza);
 
-    parser->expat = XML_ParserCreateNS(NULL, NAMESPACE_SEP);
     if (!parser->expat) return 0;
 
-    parser->depth = 0;
+    parser->depth = depth;
     parser->stanza = NULL;
 
     if (parser->inner_text) {
         xmpp_free (parser->ctx, parser->inner_text);
         parser->inner_text = NULL;
+        parser->inner_text_used = 0;
+        parser->inner_text_size = 0;
     }
 
     XML_SetUserData(parser->expat, parser);
@@ -299,5 +343,7 @@ int parser_reset(parser_t *parser)
 
 int parser_feed(parser_t *parser, char *chunk, int len)
 {
+    UpdateMemCtx(parser);
+
     return XML_Parse(parser->expat, chunk, len, 0);
 }

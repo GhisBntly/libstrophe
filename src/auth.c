@@ -24,7 +24,12 @@
 #include "rand.h"
 
 #ifdef _MSC_VER
+// VS2015 and newer are more standard compliant
+#if _MSC_VER >= 1900
+#define strcasecmp _stricmp
+#else
 #define strcasecmp stricmp
+#endif
 #endif
 
 /* TODO: these should configurable at runtime on a per connection basis  */
@@ -223,7 +228,7 @@ static int _handle_features(xmpp_conn_t * const conn,
 
     /* check for TLS */
     if (!conn->secured) {
-        if (!conn->tls_disabled) {
+        if (!conn->tls_disabled && !(conn->extsock && conn->extsock->is_websocket)) { /* websocket xmpp uses ssl at the http layer */
             child = xmpp_stanza_get_child_by_name(stanza, "starttls");
             if (child) {
                 ns = xmpp_stanza_get_ns(child);

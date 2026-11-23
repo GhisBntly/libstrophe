@@ -33,6 +33,8 @@ typedef struct resolver_srv_rr_struc {
     struct resolver_srv_rr_struc *next;
 } resolver_srv_rr_t;
 
+#if !defined(USE_WEBSOCKETS)
+
 /** Perform lookup for RFC1035 message format.
  *  This function allocates all elements.
  *
@@ -65,5 +67,7 @@ int resolver_srv_lookup(xmpp_ctx_t *ctx, const char *service, const char *proto,
  *  @param srv_rr_list a list allocated by lookup functions
  */
 void resolver_srv_free(xmpp_ctx_t *ctx, resolver_srv_rr_t *srv_rr_list);
+
+#endif /* USE_WEBSOCKETS */
 
 #endif /* __LIBSTROPHE_RESOLVER_H__ */

@@ -13,11 +13,15 @@
  *  DNS resolver.
  */
 
-#ifndef _WIN32
+#if !defined(USE_WEBSOCKETS) && !defined(DISABLE_SRV_LOOKUP)
+
+#if !defined(_WIN32)
 #include <netinet/in.h>
 #include <arpa/nameser.h>
 #include <resolv.h>             /* res_query */
-#endif /* _WIN32 */
+#else /* ^^^ !defined(_WIN32) vvv defined(_WIN32) */
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#endif /* defined(_WIN32) */
 
 #include <string.h>             /* strncpy */
 
@@ -354,6 +358,10 @@ void resolver_srv_free(xmpp_ctx_t *ctx, resolver_srv_rr_t *srv_rr_list)
 #include <ws2tcpip.h>
 #include <windns.h>
 #include <Iphlpapi.h>
+
+#if !defined(DNS_QUERY_STANDARD)
+#define DNS_QUERY_STANDARD 0
+#endif
 
 struct dnsquery_header
 {
@@ -765,3 +773,6 @@ static int resolver_win32_srv_query(const char *fulldomain,
 }
 
 #endif /* _WIN32 */
+
+#endif /* USE_WEBSOCKETS */
+

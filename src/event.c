@@ -41,8 +41,11 @@
 #define _sleep(x) usleep((x) * 1000)
 #else
 #include <winsock2.h>
+#undef ETIMEDOUT
 #define ETIMEDOUT WSAETIMEDOUT
+#undef ECONNRESET
 #define ECONNRESET WSAECONNRESET
+#undef ECONNABORTED
 #define ECONNABORTED WSAECONNABORTED
 #define _sleep(x) Sleep(x)
 #endif
@@ -50,6 +53,17 @@
 #include <strophe.h>
 #include "common.h"
 #include "parser.h"
+
+#if defined(USE_SOCKETAPI_DISPATCH)
+#include <sys/socket.h>
+#include <netdb.h>
+#include <poll.h>
+#include "unreal_socketapi.h"
+#endif
+
+
+/** Max buffer size for receiving libstrophe messages. Default of 4096 has proven too small in practice */
+#define STROPE_MESSAGE_BUFFER_SIZE (1024*32)
 
 /** Run the event loop once.
  *  This function will run send any data that has been queued by
@@ -70,11 +84,11 @@ void xmpp_run_once(xmpp_ctx_t *ctx, const unsigned long timeout)
     xmpp_conn_t *conn;
     fd_set rfds, wfds;
     sock_t max = 0;
-    int ret;
+    int ret = 0;
     struct timeval tv;
     xmpp_send_queue_t *sq, *tsq;
     int towrite;
-    char buf[4096];
+    char buf[STROPE_MESSAGE_BUFFER_SIZE];
     uint64_t next;
     uint64_t usec;
     int tls_read_bytes = 0;
@@ -85,7 +99,7 @@ void xmpp_run_once(xmpp_ctx_t *ctx, const unsigned long timeout)
     connitem = ctx->connlist;
     while (connitem) {
         conn = connitem->conn;
-        if (conn->state != XMPP_STATE_CONNECTED) {
+        if (conn->state != XMPP_STATE_CONNECTED || conn->extsock) {
             connitem = connitem->next;
             continue;
         }
@@ -177,8 +191,12 @@ void xmpp_run_once(xmpp_ctx_t *ctx, const unsigned long timeout)
 
             /* make sure the timeout hasn't expired */
             if (time_elapsed(conn->timeout_stamp, time_stamp()) <=
-                conn->connect_timeout)
-                FD_SET(conn->sock, &wfds);
+                conn->connect_timeout) {
+                if (!conn->extsock)
+                {
+                    FD_SET(conn->sock, &wfds);
+                }
+            }
             else {
                 conn->error = ETIMEDOUT;
                 xmpp_info(ctx, "xmpp", "Connection attempt timed out.");
@@ -186,9 +204,12 @@ void xmpp_run_once(xmpp_ctx_t *ctx, const unsigned long timeout)
             }
             break;
         case XMPP_STATE_CONNECTED:
-            FD_SET(conn->sock, &rfds);
-            if (conn->send_queue_len > 0)
-                FD_SET(conn->sock, &wfds);
+            if (!conn->extsock)
+            {
+                FD_SET(conn->sock, &rfds);
+                if (conn->send_queue_len > 0)
+                    FD_SET(conn->sock, &wfds);
+            }
             break;
         case XMPP_STATE_DISCONNECTED:
             /* do nothing */
@@ -200,7 +221,7 @@ void xmpp_run_once(xmpp_ctx_t *ctx, const unsigned long timeout)
         if (conn->tls)
             tls_read_bytes += tls_pending(conn->tls);
 
-        if (conn->state != XMPP_STATE_DISCONNECTED && conn->sock > max)
+        if (conn->state != XMPP_STATE_DISCONNECTED && conn->sock > max && !conn->extsock)
             max = conn->sock;
 
         connitem = connitem->next;
@@ -208,7 +229,11 @@ void xmpp_run_once(xmpp_ctx_t *ctx, const unsigned long timeout)
 
     /* check for events */
     if (max > 0)
+#if defined(USE_WEBSOCKETS)
+        ret = sockets_ready(&rfds, &wfds);
+#else
         ret = select(max + 1, &rfds,  &wfds, NULL, &tv);
+#endif
     else {
         if (timeout > 0)
             _sleep(timeout);
@@ -254,12 +279,31 @@ void xmpp_run_once(xmpp_ctx_t *ctx, const unsigned long timeout)
         case XMPP_STATE_CONNECTED:
             if (FD_ISSET(conn->sock, &rfds) || (conn->tls && tls_pending(conn->tls))) {
                 if (conn->tls) {
-                    ret = tls_read(conn->tls, buf, 4096);
+                    ret = tls_read(conn->tls, buf, STROPE_MESSAGE_BUFFER_SIZE);
                 } else {
-                    ret = sock_read(conn->sock, buf, 4096);
+                    ret = sock_read(conn->sock, buf, STROPE_MESSAGE_BUFFER_SIZE);
                 }
 
                 if (ret > 0) {
+#ifdef USE_WEBSOCKETS
+                    // Translate WebSocket open/close tags into <stream:stream> and </stream:stream> tags. All other stanzas remain unchanged, but the open
+                    // and close tags make a connection as a whole not parse as XML (each stanza would have to be independently interpreted).
+                    static const char SocketOpenTag[] = "<open";
+                    static const int SocketOpenTagSize = sizeof(SocketOpenTag) - sizeof(char); // Subtract null char
+                    static const char SocketCloseTag[] = "<close";
+                    static const int SocketCloseTagSize = sizeof(SocketCloseTag) - sizeof(char); // Subtract null char
+
+                    if (memcmp(buf, SocketOpenTag, SocketOpenTagSize) == 0)
+                    {
+                        sprintf_s(buf, STROPE_MESSAGE_BUFFER_SIZE, "<?xml version=\"1.0\" encoding=\"utf-8\"?><stream:stream from=\"%s\" xmlns=\"jabber:client\" xmlns:stream=\"http://etherx.jabber.org/streams\" version=\"1.0\">", conn->domain);
+                        ret = strlen(buf);
+                    }
+                    if (memcmp(buf, SocketCloseTag, SocketCloseTagSize) == 0)
+                    {
+                        sprintf_s(buf, STROPE_MESSAGE_BUFFER_SIZE, "</stream:stream>");
+                        ret = strlen(buf);
+                    }
+#endif
                     ret = parser_feed(conn->parser, buf, ret);
                     if (!ret) {
                         xmpp_debug(ctx, "xmpp", "parse error [%s]", buf);

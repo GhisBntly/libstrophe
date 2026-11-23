@@ -86,7 +86,11 @@ char *xmpp_strtok_r(char *s, const char *delim, char **saveptr)
  */
 uint64_t time_stamp(void)
 {
-#ifdef _WIN32
+#if defined(_XBOX_ONE)
+    uint64_t SystemTime;
+    GetSystemTimeAsFileTime((FILETIME*)&SystemTime);
+    return (SystemTime / 10000); // convert 100 nanosec ticks to milliseconds
+#elif defined(_WIN32)
     return timeGetTime();
 #else
     struct timeval tv;

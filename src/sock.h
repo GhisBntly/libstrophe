@@ -18,11 +18,21 @@
 
 #include <stdio.h>
 
-#ifndef _WIN32
+#if defined(_XBOX_ONE)
+#include <winsock2.h>
+#if defined __cplusplus
+extern "C" {
+#endif
+typedef int sock_t;
+#elif !defined(_WIN32)
 typedef int sock_t;
 #else
 #include <winsock2.h>
 typedef SOCKET sock_t;
+#endif
+
+#if defined(USE_WEBSOCKETS)
+int sockets_ready(fd_set* read_set, fd_set* write_set);
 #endif
 
 void sock_initialize(void);
@@ -42,4 +52,7 @@ int sock_is_recoverable(const int error);
 int sock_connect_error(const sock_t sock);
 int sock_set_keepalive(const sock_t sock, int timeout, int interval);
 
+#if defined(_XBOX_ONE) && defined(__cplusplus)
+}
+#endif
 #endif /* __LIBSTROPHE_SOCK_H__ */
