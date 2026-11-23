@@ -25,7 +25,7 @@ void tls_initialize(void);
 void tls_shutdown(void);
 
 tls_t *tls_new(xmpp_conn_t *conn);
-void tls_free(tls_t *tls);
+void strophe_tls_free(tls_t *tls);
 
 int tls_set_credentials(tls_t *tls, const char *cafilename);
 #if defined(USE_UNREAL_SSL)

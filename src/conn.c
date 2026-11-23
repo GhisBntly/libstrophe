@@ -716,7 +716,7 @@ void conn_disconnect(xmpp_conn_t * const conn)
     conn->state = XMPP_STATE_DISCONNECTED;
     if (conn->tls) {
         tls_stop(conn->tls);
-        tls_free(conn->tls);
+        strophe_tls_free(conn->tls);
         conn->tls = NULL;
     }
     if (conn->extsock)
@@ -969,7 +969,7 @@ int conn_tls_start(xmpp_conn_t * const conn)
         } else {
             rc = XMPP_EINT;
             conn->error = tls_error(conn->tls);
-            tls_free(conn->tls);
+            strophe_tls_free(conn->tls);
             conn->tls = NULL;
             conn->tls_failed = 1;
         }

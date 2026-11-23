@@ -587,7 +587,7 @@ static void _auth(xmpp_conn_t * const conn)
 	    _auth(conn);
 	    return;
 	} else {
-	    tls_free(tls);
+	    strophe_tls_free(tls);
 	}
 
 	auth = _make_starttls(conn);

@@ -152,7 +152,7 @@ err:
     return NULL;
 }
 
-void tls_free(tls_t *tls)
+void strophe_tls_free(tls_t *tls)
 {
     SSL_free(tls->ssl);
     SSL_CTX_free(tls->ssl_ctx);
